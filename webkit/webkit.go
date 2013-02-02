@@ -19,19 +19,48 @@ static inline gchar* to_gcharptr(const char* s) { return (gchar*)s; }
 
 static inline char* to_charptr(const gchar* s) { return (char*)s; }
 
+static inline char* gstring_to_charptr(GString* s) { return (char*)s->str; }
+
 //static GtkWidget* to_GtkWidget(void* w) { return GTK_WIDGET(w); }
 
 static WebKitWebView* to_WebKitWebView(void* w) { return WEBKIT_WEB_VIEW(w); }
 
 static WebKitWebFrame* to_WebKitWebFrame(void* w) { return WEBKIT_WEB_FRAME(w); }
 
+static WebKitWebDataSource* to_WebKitWebDataSource(void* w) { return WEBKIT_WEB_DATA_SOURCE(w); }
+
+static WebKitWebResource* to_WebKitWebResource(void* w) { return WEBKIT_WEB_RESOURCE(w); }
+
+static WebKitDOMDocument* to_WebKitDOMDocument(void* w) { return WEBKIT_DOM_DOCUMENT(w); }
+
+static WebKitDOMNode* to_WebKitDOMNode(void* w) { return WEBKIT_DOM_NODE(w); }
+
+static WebKitDOMHTMLAnchorElement* to_WebKitDOMHTMLAnchorElement(void* w) { return 	WEBKIT_DOM_HTML_ANCHOR_ELEMENT(w); }
+
 static WebKitWebSettings* to_WebKitWebSettings(void* w) { return WEBKIT_WEB_SETTINGS(w); }
+
+static int loadStatus_to_int(WebKitLoadStatus status) {
+	switch (status) {
+	case WEBKIT_LOAD_PROVISIONAL:
+		return 0;
+	case WEBKIT_LOAD_COMMITTED:
+		return 1;
+	case WEBKIT_LOAD_FINISHED:
+		return 2;
+	case WEBKIT_LOAD_FIRST_VISUALLY_NON_EMPTY_LAYOUT:
+		return 3;
+	case WEBKIT_LOAD_FAILED:
+		return 4;
+	}
+	return -1;
+}
 */
 // #cgo pkg-config: webkit-1.0
 import "C"
 import "github.com/mattn/go-gtk/gtk"
 import "github.com/mattn/go-gtk/glib"
 import "unsafe"
+//import "log"
 
 func bool2gboolean(b bool) C.gboolean {
 	if b {
@@ -40,15 +69,20 @@ func bool2gboolean(b bool) C.gboolean {
 	return C.gboolean(0)
 }
 func gboolean2bool(b C.gboolean) bool {
-	if b != 0 {
-		return true
-	}
-	return false
+	return b != 0
 }
 
 //-----------------------------------------------------------------------
 // WebView
 //-----------------------------------------------------------------------
+const(
+	WEBKIT_LOAD_INVALID = -1
+	WEBKIT_LOAD_PROVISIONAL = 0
+    WEBKIT_LOAD_COMMITTED = 1
+    WEBKIT_LOAD_FINISHED = 2
+    WEBKIT_LOAD_FIRST_VISUALLY_NON_EMPTY_LAYOUT = 3
+    WEBKIT_LOAD_FAILED = 4
+)
 type WebView struct {
 	gtk.Widget
 }
@@ -233,8 +267,14 @@ func (v *WebView) SetCustomEncoding(encoding string) {
 func (v *WebView) GetCustomEncoding() string {
 	return C.GoString(C.webkit_web_view_get_custom_encoding(v.getWebView()))
 }
+func (v *WebView) GetDOMDocument() *DOMDocument {
+	return &DOMDocument{glib.GObject{unsafe.Pointer(C.webkit_web_view_get_dom_document(v.getWebView()))}}
+}
 //WEBKIT_API void webkit_web_view_move_cursor (WebKitWebView * webView, GtkMovementStep step, gint count);
 //WEBKIT_API WebKitLoadStatus webkit_web_view_get_load_status (WebKitWebView *web_view);
+func (v *WebView) GetLoadStatus() int {
+	return int(C.loadStatus_to_int(C.webkit_web_view_get_load_status(v.getWebView())))
+}
 func (v *WebView) GetProgress() float64 {
 	return float64(C.webkit_web_view_get_progress(v.getWebView()))
 }
@@ -305,7 +345,9 @@ func (v *WebFrame) getWebFrame() *C.WebKitWebFrame {
 
 // WebKitWebFrame *    webkit_web_frame_find_frame         (WebKitWebFrame *frame,
 //                                                          const gchar *name);
-// WebKitWebDataSource * webkit_web_frame_get_data_source  (WebKitWebFrame *frame);
+func (v *WebFrame) GetDataSource() *DataSource {
+	return &DataSource{glib.GObject{unsafe.Pointer(C.webkit_web_frame_get_data_source(v.getWebFrame()))}}
+}
 // JSGlobalContextRef  webkit_web_frame_get_global_context (WebKitWebFrame *frame);
 func (v *WebFrame) GetHorizontalScrollbarPolicy() uint {
 	return uint(C.webkit_web_frame_get_horizontal_scrollbar_policy(v.getWebFrame()))
@@ -364,6 +406,137 @@ func (v *WebFrame) Reload() {
 }
 func (v *WebFrame) StopLoading() {
 	C.webkit_web_frame_stop_loading(v.getWebFrame())
+}
+
+
+
+//-----------------------------------------------------------------------
+// DataSource
+//-----------------------------------------------------------------------
+type DataSource struct {
+	glib.GObject
+}
+func (v *DataSource) getDataSource() *C.WebKitWebDataSource {
+	return C.to_WebKitWebDataSource(unsafe.Pointer(v.Object))
+}
+
+func (v *DataSource) GetData() string {
+	return C.GoString(C.gstring_to_charptr(C.webkit_web_data_source_get_data(v.getDataSource())))
+}
+func (v *DataSource) GetEncoding() string {
+	return C.GoString(C.to_charptr(C.webkit_web_data_source_get_encoding(v.getDataSource())))
+}
+//WebKitNetworkRequest * webkit_web_data_source_get_initial_request
+//                                                        (WebKitWebDataSource *data_source);
+func (v *DataSource) GetMainResource() *WebResource {
+	return &WebResource{glib.GObject{unsafe.Pointer(C.webkit_web_data_source_get_main_resource(v.getDataSource()))}}
+}
+//WebKitNetworkRequest * webkit_web_data_source_get_request
+//                                                        (WebKitWebDataSource *data_source);
+func (v *DataSource) GetSubresources() []*WebResource {
+	gList := C.webkit_web_data_source_get_subresources(v.getDataSource())
+	list := glib.ListFromNative(unsafe.Pointer(gList))
+	
+	resources := []*WebResource{}
+	l := list.First()
+	for n := uint(0); n < l.Length(); n++ {
+		resource := &WebResource{glib.GObject{unsafe.Pointer(C.g_list_nth_data(gList, C.guint(n)))}}
+		resources = append(resources, resource)
+	}
+	return resources
+}
+func (v *DataSource) GetUnreachableUri() string {
+	return C.GoString(C.to_charptr(C.webkit_web_data_source_get_unreachable_uri(v.getDataSource())))
+}
+func (v *DataSource) GetMainFrame() *WebFrame {
+	return &WebFrame{glib.GObject{unsafe.Pointer(C.webkit_web_data_source_get_web_frame(v.getDataSource()))}}
+}
+func (v *DataSource) IsLoading() bool {
+	return gboolean2bool(C.webkit_web_data_source_is_loading(v.getDataSource()))
+}
+//WebKitWebDataSource * webkit_web_data_source_new        (void);
+
+//-----------------------------------------------------------------------
+// WebResource
+//-----------------------------------------------------------------------
+type WebResource struct {
+	glib.GObject
+}
+func (v *WebResource) getWebResource() *C.WebKitWebResource {
+	return C.to_WebKitWebResource(unsafe.Pointer(v.Object))
+}
+
+func (v *WebResource) GetData() string {
+	return C.GoString(C.gstring_to_charptr(C.webkit_web_resource_get_data(v.getWebResource())))
+}
+func (v *WebResource) GetEncoding() string {
+	return C.GoString(C.to_charptr(C.webkit_web_resource_get_encoding(v.getWebResource())))
+}
+func (v *WebResource) GetFrameName() string {
+	return C.GoString(C.to_charptr(C.webkit_web_resource_get_frame_name(v.getWebResource())))
+}
+func (v *WebResource) GetMimeType() string {
+	return C.GoString(C.to_charptr(C.webkit_web_resource_get_mime_type(v.getWebResource())))
+}
+func (v *WebResource) GetUri() string {
+	return C.GoString(C.to_charptr(C.webkit_web_resource_get_uri(v.getWebResource())))
+}
+
+//-----------------------------------------------------------------------
+// DOMDocument
+//-----------------------------------------------------------------------
+type DOMDocument struct {
+	glib.GObject
+}
+func (v *DOMDocument) getDOMDocument() *C.WebKitDOMDocument {
+	return C.to_WebKitDOMDocument(unsafe.Pointer(v.Object))
+}
+func (v *DOMDocument) GetElementsByTagName(tagName string) []*DOMNode {
+	CtagName := C.CString(tagName)
+	defer C.free_string(CtagName)
+	GtagName := C.to_gcharptr(CtagName)
+	
+	list := C.webkit_dom_document_get_elements_by_tag_name(v.getDOMDocument(), GtagName)
+	length := C.webkit_dom_node_list_get_length(list);
+	
+	//log.Fatal(length)
+	
+	nodes := []*DOMNode{}
+	for i := C.gulong(0); i < length; i++ {
+		domNode := &DOMNode{glib.GObject{unsafe.Pointer(C.webkit_dom_node_list_item(list, C.gulong(i)))}}
+		nodes = append(nodes, domNode);	
+	}
+	return nodes
+}
+
+//-----------------------------------------------------------------------
+// DOMNode
+//-----------------------------------------------------------------------
+type DOMNode struct {
+	glib.GObject
+}
+func (v *DOMNode) getDOMNode() *C.WebKitDOMNode {
+	return C.to_WebKitDOMNode(unsafe.Pointer(v.Object))
+}
+func (v *DOMNode) ToHTMLAnchorElement() *DOMHTMLAnchorElement {
+	return &DOMHTMLAnchorElement{glib.GObject{unsafe.Pointer(v.Object)}}
+}
+/*func (v *DOMNode) ToElement() *interface{} {
+	return &interface{}
+}*/
+
+//-----------------------------------------------------------------------
+// DOMHTMLAnchorElement
+//-----------------------------------------------------------------------
+type DOMHTMLAnchorElement struct {
+	glib.GObject
+}
+func (v *DOMHTMLAnchorElement) getDOMHTMLAnchorElement() *C.WebKitDOMHTMLAnchorElement {
+	return C.to_WebKitDOMHTMLAnchorElement(unsafe.Pointer(v.Object))
+}
+
+func (v *DOMHTMLAnchorElement) GetHref() string {
+	return C.GoString(C.to_charptr(C.webkit_dom_html_anchor_element_get_href(v.getDOMHTMLAnchorElement())))
 }
 
 //-----------------------------------------------------------------------
